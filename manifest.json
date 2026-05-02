@@ -1,13 +1,26 @@
 {
+  "icons": [
+    {
+      "src": "android/launchericon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "android/launchericon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
   "background_color": "#e51b1b",
   "dir": "ltr",
   "display": "standalone",
   "name": "HevelWorkAttendanceName",
-  "orientation": "any",
-  "scope": "/work-attendance-Hevel_2/",
+  "short_name": "HevelWorkAttendanceShort",
   "start_url": "/work-attendance-Hevel_2/",
+  "scope": "/work-attendance-Hevel_2/",
   "theme_color": "#33e14b",
   "id": "HevelWorkAttendanceID",
   "description": "HevelWorkAttendanceDescription",
-  "short_name": "HevelWorkAttendanceShort"
+  "orientation": "any"
 }
