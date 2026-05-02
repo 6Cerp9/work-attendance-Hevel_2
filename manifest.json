@@ -1,0 +1,13 @@
+{
+  "background_color": "#e51b1b",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "HevelWorkAttendanceName",
+  "orientation": "any",
+  "scope": "/work-attendance-Hevel_2/",
+  "start_url": "/work-attendance-Hevel_2/",
+  "theme_color": "#33e14b",
+  "id": "HevelWorkAttendanceID",
+  "description": "HevelWorkAttendanceDescription",
+  "short_name": "HevelWorkAttendanceShort"
+}
