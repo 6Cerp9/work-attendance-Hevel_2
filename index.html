@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Журнал посещаемости</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f5f5f5; display: flex; height: 100vh; overflow: hidden; }
+        /* Выезжающая панель месяцев */
+        #drawer {
+            position: fixed; left: -280px; top: 0; width: 260px; height: 100%;
+            background: white; box-shadow: 2px 0 10px rgba(0,0,0,0.2);
+            transition: left 0.3s; z-index: 1001; display: flex; flex-direction: column;
+        }
+        #drawer.open { left: 0; }
+        #drawer-header { padding: 16px; background: #2196F3; color: white; font-size: 18px; }
+        #month-list { flex: 1; overflow-y: auto; list-style: none; padding: 8px; }
+        #month-list li { padding: 12px; margin: 4px 0; border-radius: 8px; cursor: pointer; background: #f0f0f0; }
+        #month-list li.active { background: #2196F3; color: white; }
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); z-index: 1000; display: none;
+        }
+        #overlay.show { display: block; }
+
+        /* Основной экран */
+        #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        #topbar {
+            display: flex; align-items: center; background: #2196F3; color: white; padding: 10px;
+            position: sticky; top: 0; z-index: 10;
+        }
+        #menu-btn { background: none; border: none; color: white; font-size: 24px; margin-right: 10px; cursor: pointer; }
+        #title { flex: 1; font-size: 18px; }
+        #add-worker-btn { background: none; border: none; color: white; font-size: 28px; cursor: pointer; }
+
+        /* Таблица с горизонтальной прокруткой, первая и последние колонки прилипают */
+        #table-container { flex: 1; overflow: auto; position: relative; }
+        table { border-collapse: collapse; min-width: 100%; }
+        th, td {
+            border: 1px solid #ccc; padding: 6px 10px; text-align: center; position: relative;
+            min-width: 38px; white-space: nowrap;
+        }
+        thead th { background: #e0e0e0; position: sticky; top: 0; z-index: 5; }
+        /* Прилипание левой и правых колонок */
+        th:first-child, td:first-child {
+            position: sticky; left: 0; background: #fff; z-index: 3;
+            min-width: 150px; text-align: left;
+        }
+        thead th:first-child { z-index: 7; }
+        th.days-col, td.days-col,
+        th.hours-col, td.hours-col {
+            position: sticky; right: 0; background: #fff; z-index: 3;
+        }
+        th.days-col { right: 80px; } /* ширина hours-col */
+        th.hours-col { right: 0; }
+        td.days-col { right: 80px; }
+        td.hours-col { right: 0; }
+        /* Индикаторы внутри ячейки */
+        .cell-content { position: relative; display: inline-flex; align-items: center; }
+        .comment-flag {
+            position: absolute; top: -6px; right: -8px; width: 14px; height: 14px;
+            background: #4CAF50; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: white; pointer-events: none;
+        }
+        .lock-icon {
+            position: absolute; bottom: -6px; left: -8px; font-size: 12px; color: #f44336; pointer-events: none;
+        }
+        /* Модальное окно */
+        .modal {
+            display: none; position: fixed; top: 20%; left: 50%; transform: translate(-50%, 0);
+            background: white; padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            z-index: 2000; width: 90%; max-width: 350px;
+        }
+        .modal.open { display: block; }
+        .modal input, .modal select, .modal textarea { width: 100%; margin: 8px 0; padding: 8px; }
+        .modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+<div id="drawer">
+    <div id="drawer-header">📅 Месяцы</div>
+    <ul id="month-list"></ul>
+</div>
+<div id="overlay" onclick="closeDrawer()"></div>
+
+<div id="main">
+    <div id="topbar">
+        <button id="menu-btn" onclick="toggleDrawer()">☰</button>
+        <span id="title">Посещаемость</span>
+        <button id="add-worker-btn" onclick="addWorker()" title="Добавить работника">➕</button>
+    </div>
+    <div id="table-container">
+        <table id="attendance-table">
+            <thead></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Модальное окно редактирования ячейки -->
+<div id="cell-modal" class="modal">
+    <h3>Редактировать отметку</h3>
+    <label>Символ (или часы)</label>
+    <input type="text" id="cell-symbol" list="symbols" placeholder="+, -, ?, 1/2, число">
+    <datalist id="symbols">
+        <option value="+">
+        <option value="-">
+        <option value="?">
+        <option value="1/2">
+    </datalist>
+    <label>Комментарий</label>
+    <textarea id="cell-comment" rows="2" placeholder="Введите комментарий"></textarea>
+    <label>
+        <input type="checkbox" id="cell-locked"> 🔒 Запереть ячейку (только долгим нажатием)
+    </label>
+    <div class="modal-buttons">
+        <button onclick="closeModal()">Отмена</button>
+        <button onclick="saveCell()">Сохранить</button>
+    </div>
+</div>
+
+<script>
+    // ---------- База данных IndexedDB ----------
+    const DB_NAME = 'AttendanceJournalDB';
+    const DB_VERSION = 1;
+    let db;
+
+    function openDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('workers')) {
+                    db.createObjectStore('workers', { keyPath: 'id' });
+                }
+                if (!db.objectStoreNames.contains('attendance')) {
+                    db.createObjectStore('attendance', { keyPath: 'id' }); // id = "YYYY-MM_workerId"
+                }
+            };
+            request.onsuccess = (e) => { db = e.target.result; resolve(db); };
+            request.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    function dbPut(storeName, value) {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, 'readwrite');
+            const store = tx.objectStore(storeName);
+            store.put(value);
+            tx.oncomplete = () => resolve();
+            tx.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    function dbGetAll(storeName) {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, 'readonly');
+            const store = tx.objectStore(storeName);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    // ---------- Состояние ----------
+    let workers = [];            // [{id, name}]
+    let currentMonth = '';      // "YYYY-MM"
+    let selectedCellData = null; // { workerId, day, symbol, comment, locked }
+
+    // Получить ключ месяца из Date
+    function getMonthKey(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`; }
+
+    // ---------- Инициализация ----------
+    async function init() {
+        await openDB();
+        workers = await dbGetAll('workers');
+        const now = new Date();
+        currentMonth = getMonthKey(now);
+        populateMonthList();
+        selectMonth(currentMonth);
+    }
+
+    // ---------- Меню месяцев ----------
+    function populateMonthList() {
+        const list = document.getElementById('month-list');
+        list.innerHTML = '';
+        const base = new Date();
+        for (let i = -12; i <= 12; i++) {
+            const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+            const key = getMonthKey(d);
+            const li = document.createElement('li');
+            li.textContent = d.toLocaleString('ru', { month: 'long', year: 'numeric' });
+            li.dataset.month = key;
+            li.onclick = () => selectMonth(key);
+            list.appendChild(li);
+        }
+    }
+
+    function toggleDrawer() {
+        const drawer = document.getElementById('drawer');
+        const overlay = document.getElementById('overlay');
+        drawer.classList.toggle('open');
+        overlay.classList.toggle('show');
+    }
+
+    function closeDrawer() {
+        document.getElementById('drawer').classList.remove('open');
+        document.getElementById('overlay').classList.remove('show');
+    }
+
+    function selectMonth(monthKey) {
+        currentMonth = monthKey;
+        document.getElementById('title').textContent = `📆 ${monthKey}`;
+        document.querySelectorAll('#month-list li').forEach(li => li.classList.remove('active'));
+        const active = document.querySelector(`#month-list li[data-month="${monthKey}"]`);
+        if (active) active.classList.add('active');
+        closeDrawer();
+        renderTable();
+    }
+
+    // ---------- Работники ----------
+    async function addWorker() {
+        const name = prompt('Имя нового работника:');
+        if (!name || !name.trim()) return;
+        const newWorker = { id: Date.now().toString(), name: name.trim() };
+        workers.push(newWorker);
+        await dbPut('workers', newWorker);
+        renderTable();
+    }
+
+    // ---------- Данные посещаемости ----------
+    function getAttendanceId(month, workerId) { return `${month}_${workerId}`; }
+
+    async function getAttendanceRecord(month, workerId) {
+        const id = getAttendanceId(month, workerId);
+        const tx = db.transaction('attendance', 'readonly');
+        const store = tx.objectStore('attendance');
+        return new Promise((resolve) => {
+            const req = store.get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    }
+
+    async function saveAttendanceRecord(month, workerId, record) {
+        const id = getAttendanceId(month, workerId);
+        record.id = id;
+        return dbPut('attendance', record);
+    }
+
+    // ---------- Таблица ----------
+    async function renderTable() {
+        const [year, month] = currentMonth.split('-').map(Number);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const table = document.getElementById('attendance-table');
+        const thead = table.querySelector('thead');
+        const tbody = table.querySelector('tbody');
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+
+        let headerHTML = '<tr><th>Работник</th>';
+        for (let d = 1; d <= daysInMonth; d++) headerHTML += `<th>${d}</th>`;
+        headerHTML += '<th class="days-col">Дни</th><th class="hours-col">Часы</th></tr>';
+        thead.innerHTML = headerHTML;
+
+        for (const worker of workers) {
+            const record = await getAttendanceRecord(currentMonth, worker.id);
+            const daysData = record ? record.days : {};
+            let totalDays = 0;
+            let totalHours = 0;
+
+            let rowHTML = `<td>${worker.name}</td>`;
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cell = daysData[d] || { symbol: '', comment: '', locked: false };
+                const sym = cell.symbol;
+                const hasComment = cell.comment && cell.comment.trim().length > 0;
+                const locked = cell.locked;
+
+                let dayAdd = 0, hourAdd = 0;
+                if (sym === '+') { dayAdd = 1; hourAdd = 8; }
+                else if (sym === '1/2') { dayAdd = 0.5; hourAdd = 4; }
+                else if (sym && !isNaN(parseFloat(sym))) { hourAdd = parseFloat(sym); }
+                totalDays += dayAdd;
+                totalHours += hourAdd;
+
+                let flagsHTML = '';
+                if (hasComment) flagsHTML += '<span class="comment-flag">💬</span>';
+                if (locked) flagsHTML += '<span class="lock-icon">🔒</span>';
+                rowHTML += `<td class="${locked ? 'cell-locked' : ''}" 
+                    data-worker="${worker.id}" data-day="${d}"
+                    data-symbol="${sym}" data-comment="${encodeURIComponent(cell.comment||'')}" data-locked="${locked}">
+                    <div class="cell-content">${sym}${flagsHTML}</div>
+                </td>`;
+            }
+            rowHTML += `<td class="days-col">${totalDays.toFixed(1)}</td>`;
+            rowHTML += `<td class="hours-col">${totalHours.toFixed(1)}</td>`;
+            const row = document.createElement('tr');
+            row.innerHTML = rowHTML;
+            tbody.appendChild(row);
+        }
+        attachCellListeners();
+    }
+
+    function attachCellListeners() {
+        const cells = document.querySelectorAll('td[data-worker]');
+        cells.forEach(cell => {
+            const locked = cell.dataset.locked === 'true';
+            let longPressTimer;
+            let longPressFired = false;
+
+            // Одиночное нажатие — переключение символа (если не заперто)
+            cell.addEventListener('click', (e) => {
+                // Если только что сработало длинное нажатие, игнорируем click
+                if (longPressFired) {
+                    longPressFired = false;
+                    return;
+                }
+                if (!locked) {
+                    toggleCell(cell);
+                }
+            });
+
+            // Общий старт для touch и mouse
+            const startPress = (e) => {
+                longPressFired = false;
+                longPressTimer = setTimeout(() => {
+                    longPressFired = true;
+                    openCellModal(cell);
+                }, 500);
+            };
+            const cancelPress = () => {
+                clearTimeout(longPressTimer);
+            };
+
+            cell.addEventListener('touchstart', startPress);
+            cell.addEventListener('touchend', cancelPress);
+            cell.addEventListener('touchmove', cancelPress);
+
+            cell.addEventListener('mousedown', startPress);
+            cell.addEventListener('mouseup', cancelPress);
+            cell.addEventListener('mouseleave', cancelPress);
+        });
+    }
+
+    // Переключение символа ячейки по циклу: пусто -> + -> - -> пусто
+    async function toggleCell(cell) {
+        const workerId = cell.dataset.worker;
+        const day = parseInt(cell.dataset.day);
+        const currentSymbol = cell.dataset.symbol;
+
+        let nextSymbol;
+        if (currentSymbol === '+') nextSymbol = '-';
+        else if (currentSymbol === '-') nextSymbol = '';
+        else nextSymbol = '+'; // пусто или любой другой символ
+
+        // Обновляем БД
+        let record = await getAttendanceRecord(currentMonth, workerId);
+        if (!record) record = { id: getAttendanceId(currentMonth, workerId), days: {} };
+        const oldCellData = record.days[day] || { symbol: '', comment: '', locked: false };
+        record.days[day] = { ...oldCellData, symbol: nextSymbol };
+        await saveAttendanceRecord(currentMonth, workerId, record);
+
+        // Быстрое обновление DOM (без полной перерисовки)
+        cell.dataset.symbol = nextSymbol;
+        const contentDiv = cell.querySelector('.cell-content');
+        // Удаляем старые индикаторы, сохраняя сам div
+        contentDiv.querySelectorAll('.comment-flag, .lock-icon').forEach(el => el.remove());
+        // Обновляем текст символа
+        const textNode = Array.from(contentDiv.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+        if (textNode) textNode.textContent = nextSymbol;
+        else contentDiv.prepend(document.createTextNode(nextSymbol));
+        // Восстанавливаем индикаторы, если они были (комментарий и замок не меняются при toggle)
+        if (oldCellData.locked) {
+            contentDiv.innerHTML += '<span class="lock-icon">🔒</span>';
+        }
+        if (oldCellData.comment && oldCellData.comment.trim().length > 0) {
+            contentDiv.innerHTML += '<span class="comment-flag">💬</span>';
+        }
+
+        // Пересчитываем итоги строки
+        const row = cell.closest('tr');
+        if (row) updateRowTotals(row);
+    }
+
+    // Пересчёт дней и часов в строке
+    function updateRowTotals(row) {
+        const daysCells = row.querySelectorAll('td[data-day]');
+        let totalDays = 0, totalHours = 0;
+        daysCells.forEach(td => {
+            const sym = td.dataset.symbol;
+            if (sym === '+') { totalDays += 1; totalHours += 8; }
+            else if (sym === '1/2') { totalDays += 0.5; totalHours += 4; }
+            else if (sym && !isNaN(parseFloat(sym))) { totalHours += parseFloat(sym); }
+        });
+        const daysCol = row.querySelector('td.days-col');
+        const hoursCol = row.querySelector('td.hours-col');
+        if (daysCol) daysCol.textContent = totalDays.toFixed(1);
+        if (hoursCol) hoursCol.textContent = totalHours.toFixed(1);
+    }
+
+    // ---------- Модальное окно ячейки (открывается только длинным нажатием) ----------
+    function openCellModal(cell) {
+        const workerId = cell.dataset.worker;
+        const day = parseInt(cell.dataset.day);
+        const symbol = cell.dataset.symbol;
+        const comment = decodeURIComponent(cell.dataset.comment || '');
+        const locked = cell.dataset.locked === 'true';
+
+        selectedCellData = { workerId, day, symbol, comment, locked };
+
+        document.getElementById('cell-symbol').value = symbol;
+        document.getElementById('cell-comment').value = comment;
+        document.getElementById('cell-locked').checked = locked;
+        document.getElementById('cell-modal').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('cell-modal').classList.remove('open');
+        selectedCellData = null;
+    }
+
+    async function saveCell() {
+        if (!selectedCellData) return;
+        const { workerId, day } = selectedCellData;
+        const symbol = document.getElementById('cell-symbol').value.trim();
+        const comment = document.getElementById('cell-comment').value.trim();
+        const locked = document.getElementById('cell-locked').checked;
+
+        let record = await getAttendanceRecord(currentMonth, workerId);
+        if (!record) record = { id: getAttendanceId(currentMonth, workerId), days: {} };
+        record.days[day] = { symbol, comment, locked };
+
+        await saveAttendanceRecord(currentMonth, workerId, record);
+        closeModal();
+        renderTable(); // Полная перерисовка после изменений в модальном окне
+    }
+
+    // ---------- Старт ----------
+    window.onload = init;
+</script>
+</body>
+</html>
